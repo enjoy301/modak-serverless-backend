@@ -12,7 +12,12 @@ def lambda_handler(event, context):
     key = str(family_id) + "/" + str(user_id) + "/" + "${filename}"
     url = s3.generate_presigned_post(
         Bucket="chatapp-private",
-        Key=key
+        Key=key,
+        Conditions=[
+            ["starts-with", "$x-amz-meta-is_first", ""],
+            ["starts-with", "$x-amz-meta-count", ""]
+        ],
+        ExpiresIn=86400
     )
 
     return {
