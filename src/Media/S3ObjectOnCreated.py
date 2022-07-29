@@ -1,5 +1,6 @@
 import boto3
 import json
+from PIL import Image
 
 s3 = boto3.resource('s3')
 
@@ -28,8 +29,27 @@ def invoke_message_send_lambda(count, key):
     )
 
 
-def generate_thumbnail():
-    pass
+# 화질 1/4, 정사각형 썸네일 만들고 s3 upload하는 함수
+def generate_image_file_thumbnail(key):
+    family_id, user_id, filename = key.split('/')
+    resized_filename = 'resized-' + filename
+    new_key = family_id + '/' + user_id + '/' + resized_filename
+    image_path = '/tmp/' + filename
+    resized_image_path = '/tmp/' + resized_filename
+
+    s3.meta.client.download_file('chatapp-private', key, image_path)
+
+    with Image.open(image_path) as image:
+        thumbnail_size = tuple(x / 2 for x in image.size)
+        min_size = int(min(thumbnail_size))
+
+        # 비율 유지하면서 화질 1/4로 줄이기
+        image.thumbnail(thumbnail_size)
+        # 왼쪽 위를 기준으로 이미지 정사각형으로 자르기
+        crop_image = image.crop((0, 0, min_size, min_size))
+        crop_image.save(resized_image_path)
+
+    s3.meta.client.upload_file(resized_image_path, 'chatapp-private', new_key)
 
 
 def lambda_handler(event, context):
@@ -42,7 +62,7 @@ def lambda_handler(event, context):
     if is_first:
         invoke_message_send_lambda(count, key)
 
-    generate_thumbnail()
+    generate_image_file_thumbnail(key)
 
     return {
         'statusCode': 200,
