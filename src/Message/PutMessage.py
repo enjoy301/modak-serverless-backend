@@ -57,6 +57,7 @@ def lambda_handler(event, context):
     message = body
     del message['family_id']
     message['send_at'] = send_at.timestamp()
+    result = {'message_data': message}
 
     list_connection_loss = []
     for member in list_family_on_connecting:
@@ -64,7 +65,7 @@ def lambda_handler(event, context):
             # websocket 메시지 보내기
             ag_client.post_to_connection(
                 ConnectionId=member[1],
-                Data=json.dumps(message)
+                Data=json.dumps(result)
             )
         except:
             list_connection_loss.append(member[1])
