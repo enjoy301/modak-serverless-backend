@@ -1,68 +1,131 @@
+import os
 import boto3
 import json
 from PIL import Image
+import shutil
+import cv2
+
 
 s3 = boto3.resource('s3')
+lambda_client = boto3.client('lambda')
 
 
-def invoke_message_send_lambda(count, key):
-    family_id, user_id, filename = key.split('/')
-
-    if count == 1:
-        type_code = "image"
-    else:
-        type_code = "images"
-
-    message = {
-        'body': {
-            'family_id': family_id,
-            'user_id': user_id,
-            'content': key,
-            'type_code': type_code,
-        }
-    }
-
-    lambda_client = boto3.client('lambda')
-    lambda_client.invoke(
-        FunctionName='test-put-message',
-        Payload=json.dumps(message)
-    )
-
-
-# 화질 1/4, 정사각형 썸네일 만들고 s3 upload하는 함수
-def generate_image_file_thumbnail(key):
-    family_id, user_id, filename = key.split('/')
+def generate_image_file_thumbnail(file_path, key):
+    filename = file_path.split('/')[3]
     resized_filename = 'resized-' + filename
-    new_key = family_id + '/' + user_id + '/' + resized_filename
-    image_path = '/tmp/' + filename
     resized_image_path = '/tmp/' + resized_filename
 
-    s3.meta.client.download_file('chatapp-private', key, image_path)
+    family_id, time, _ = key.split('/')
+    image_key = family_id + '/' + time + '/' + filename
+    new_key = family_id + '/' + time + '/' + resized_filename
 
-    with Image.open(image_path) as image:
+    with Image.open(file_path) as image:
         thumbnail_size = tuple(x / 2 for x in image.size)
         min_size = int(min(thumbnail_size))
 
-        # 비율 유지하면서 화질 1/4로 줄이기
         image.thumbnail(thumbnail_size)
-        # 왼쪽 위를 기준으로 이미지 정사각형으로 자르기
         crop_image = image.crop((0, 0, min_size, min_size))
         crop_image.save(resized_image_path)
 
+    s3.meta.client.upload_file(file_path, 'chatapp-private', image_key)
     s3.meta.client.upload_file(resized_image_path, 'chatapp-private', new_key)
+
+    return new_key
+
+
+def generate_video_file_thumbnail(file_path, key):
+    filename = file_path.split('/')[3]
+    thumbnail_filename = 'thumbnail-' + filename
+    thumbnail_filepath = '/tmp/' + thumbnail_filename
+
+    family_id, time, _ = key.split('/')
+    video_key = family_id + '/' + time + '/' + filename
+    new_key = family_id + '/' + time + '/' + thumbnail_filename
+
+    cap = cv2.VideoCapture(file_path)
+    success, image = cap.read()
+
+    if success:
+        cv2.imwrite(thumbnail_filepath, image)
+
+    s3.meta.client.upload_file(file_path, 'chatapp-private', video_key)
+    s3.meta.client.upload_file(thumbnail_filepath, 'chatapp-private', new_key)
+
+    return new_key
+
+
+def invoke_message_send_lambda(file_list, object_metadata, key):
+    message = {
+        'body': {
+            'family_id': object_metadata['family_id'],
+            'user_id': object_metadata['user_id'],
+            'content': '',
+            'type_code': '',
+        }
+    }
+
+    is_first_image = True
+
+    for media_file_path in file_list:
+        file_ext = media_file_path.split('.')[1]
+
+        if file_ext in ['png', 'PNG']:
+            thumbnail_key = generate_image_file_thumbnail(media_file_path, key)
+
+            if not is_first_image:
+                continue
+
+            is_first_image = False
+
+            message['body']['content'] = thumbnail_key + ' / ' + object_metadata['image_count']
+            message['body']['type_code'] = 'image'
+
+
+        elif file_ext in ['mov', 'MOV']:
+            thumbnail_key = generate_video_file_thumbnail(media_file_path, key)
+
+            message['body']['content'] = thumbnail_key
+            message['body']['type_code'] = 'video'
+
+        lambda_client.invoke(
+            FunctionName='test-put-message',
+            Payload=json.dumps(message)
+        )
+
+
+def unzip_object(file_path):
+    shutil.unpack_archive(file_path, '/tmp/unzip', 'zip')
+
+    dir_path = "/tmp/unzip"
+
+    file_list = []
+    for (root, _, files) in os.walk(dir_path):
+        if '__MACOSX' not in root:
+            for file in files:
+                file_path = os.path.join(root, file)
+                file_list.append(file_path)
+    file_list.sort()
+
+    return file_list
+
+
+def insert_table():
+    pass
 
 
 def lambda_handler(event, context):
     key = event['Records'][0]['s3']['object']['key']
 
-    media_object = s3.Object('chatapp-private', key)
-    count = int(media_object.metadata['count'])
-    is_first = media_object.metadata['is_first']
+    object_metadata = s3.Object('chatapp-private', key).metadata
 
-    if is_first:
-        invoke_message_send_lambda(count, key)
+    file_path = '/tmp/' + key.split('/')[1]
+    s3.meta.client.download_file('chatapp-private', key, file_path)
 
-    generate_image_file_thumbnail(key)
+    file_list = unzip_object(file_path)
+
+    invoke_message_send_lambda(file_list, object_metadata, key)
+
+    insert_table()
 
     return {
         'statusCode': 200,
