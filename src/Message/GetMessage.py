@@ -35,10 +35,10 @@ def lambda_handler(event, context):
     # last_id가 0인 경우는 제일 처음 불러올 때
     if last_id == '0':
         cursor.execute(
-            f'select id, user_id, content, type_code, send_at, metadata from message_temp where family_id={family_id} LIMIT {count};')
+            f'select id, user_id, content, send_at, metadata from message_temp where family_id={family_id} LIMIT {count};')
     else:
         cursor.execute(
-            f'select id, user_id, content, type_code, send_at, metadata  from message_temp where family_id={family_id} and id<{last_id} LIMIT {count};')
+            f'select id, user_id, content, send_at, metadata from message_temp where family_id={family_id} and id<{last_id} LIMIT {count};')
 
     response_messages = cursor.fetchall()
     connection.close()
@@ -49,9 +49,8 @@ def lambda_handler(event, context):
         message_object = {
             'user_id': message[1],
             'content': message[2],
-            'type_code': message[3],
-            'send_at': datetime.timestamp(message[4]),
-            'metadata': message[5]
+            'send_at': datetime.timestamp(message[3]),
+            'metadata': message[4]
         }
         list_message.append(message_object)
 

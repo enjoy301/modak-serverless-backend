@@ -27,8 +27,12 @@ def lambda_handler(event, context):
     family_id = body["family_id"]
     user_id = body["user_id"]
     content = body["content"]
-    type_code = body["type_code"]
-    send_at = datetime.now()
+    metadata = body["metadata"]
+
+    if "send_at" in body:
+        send_at = datetime.strptime(body['send_at'], '%Yy%mm%dd%Hh%Mm%Ss%f')
+    else:
+        send_at = datetime.now()
 
     secrets = get_db_secrets()
 
@@ -45,7 +49,7 @@ def lambda_handler(event, context):
 
     # 메시지 db에 insert
     cursor.execute(
-        f"insert into message_temp (user_id, family_id, content, type_code, send_at) values({user_id}, {family_id}, '{content}', '{type_code}', '{send_at}');")
+        f"insert into message_temp (user_id, family_id, content, metadata, send_at) values({user_id}, {family_id}, '{content}', '{json.dumps(metadata)}', '{send_at}');")
     connection.commit()
 
     # Websocket 연결중인 user 검색
