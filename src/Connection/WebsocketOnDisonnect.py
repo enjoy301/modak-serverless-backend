@@ -30,12 +30,20 @@ def lambda_handler(event, context):
     )
     cursor = connection.cursor()
 
-    cursor.execute(f"update user_temp set chat_last_joined=NOW(6) where connection_id='{connection_id}'")
     cursor.execute(f"select family_id from user_temp where connection_id='{connection_id}'")
-    family_id = int(cursor.fetchall()[0][0])
+    family_id = cursor.fetchall()[0][0]
 
-    cursor.execute(f"update user_temp set connection_id=NULL where connection_id='{connection_id}'")
-    connection.commit()
+    # update 쿼리시 예외처리로 commit 필수, 안하면 레코드 잡고 안놔줌
+    try:
+        cursor.execute(
+            f"update user_temp set chat_last_joined=NOW(6), connection_id=NULL where connection_id='{connection_id}'")
+        connection.commit()
+    except:
+        connection.commit()
+        return {
+            'statusCode': 500
+        }
+
 
     # Websocket 연결중인 user 검색
     cursor.execute(
